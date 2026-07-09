@@ -36,11 +36,11 @@ app.post('/webhook/pinball', async (req, res) => {
   try {
     console.log(`Received webhook notification for ID: ${id}`);
     
-    // Styled markdown notification format
-    const message = `🔔 *New Record from Pinball!*\n\n` +
-                    `• *ID:* ${id}\n` +
-                    `• *Title:* ${title}\n` +
-                    `• *Type:* ${type}`;
+    // Styled markdown notification format in Vietnamese
+    const message = `🔔 *Thông báo mới từ Pinball!*\n\n` +
+                    `• *Mã số:* \`${id}\`\n` +
+                    `• *Khách hàng:* ${title}\n` +
+                    `• *Chi tiết:* ${type}`;
 
     await bot.telegram.sendMessage(ADMIN_CHAT_ID, message, { parse_mode: 'Markdown' });
     
@@ -59,35 +59,35 @@ const bot = new Telegraf(BOT_TOKEN);
 // Weather code decoder helper function (WMO Weather interpretation codes)
 function decodeWeatherCode(code) {
   switch (code) {
-    case 0: return '☀️ Clear sky';
-    case 1: return '🌤️ Mainly clear';
-    case 2: return '⛅ Partly cloudy';
-    case 3: return '☁️ Overcast';
-    case 45: return '🌫️ Fog';
-    case 48: return '🌫️ Depositing rime fog';
-    case 51: return '🌧️ Light drizzle';
-    case 53: return '🌧️ Moderate drizzle';
-    case 55: return '🌧️ Dense drizzle';
-    case 56: return '🌨️ Light freezing drizzle';
-    case 57: return '🌨️ Dense freezing drizzle';
-    case 61: return '🌧️ Slight rain';
-    case 63: return '🌧️ Moderate rain';
-    case 65: return '🌧️ Heavy rain';
-    case 66: return '🌨️ Light freezing rain';
-    case 67: return '🌨️ Heavy freezing rain';
-    case 71: return '❄️ Slight snow fall';
-    case 73: return '❄️ Moderate snow fall';
-    case 75: return '❄️ Heavy snow fall';
-    case 77: return '❄️ Snow grains';
-    case 80: return '🌧️ Slight rain showers';
-    case 81: return '🌧️ Moderate rain showers';
-    case 82: return '🌧️ Violent rain showers';
-    case 85: return '❄️ Slight snow showers';
-    case 86: return '❄️ Heavy snow showers';
-    case 95: return '⛈️ Thunderstorm';
-    case 96: return '⛈️ Thunderstorm with slight hail';
-    case 99: return '⛈️ Thunderstorm with heavy hail';
-    default: return '❓ Unknown weather status';
+    case 0: return '☀️ Trời quang đãng';
+    case 1: return '🌤️ Ít mây';
+    case 2: return '⛅ Mây rải rác';
+    case 3: return '☁️ Nhiều mây / U ám';
+    case 45: return '🌫️ Sương mù';
+    case 48: return '🌫️ Sương muối / Sương băng';
+    case 51: return '🌧️ Mưa phùn nhẹ';
+    case 53: return '🌧️ Mưa phùn vừa';
+    case 55: return '🌧️ Mưa phùn dày đặc';
+    case 56: return '🌨️ Mưa phùn lạnh nhẹ';
+    case 57: return '🌨️ Mưa phùn lạnh dày';
+    case 61: return '🌧️ Mưa rào nhẹ';
+    case 63: return '🌧️ Mưa rào vừa';
+    case 65: return '🌧️ Mưa rào nặng hạt';
+    case 66: return '🌨️ Mưa rào lạnh nhẹ';
+    case 67: return '🌨️ Mưa rào lạnh nặng';
+    case 71: return '❄️ Tuyết rơi nhẹ';
+    case 73: return '❄️ Tuyết rơi vừa';
+    case 75: return '❄️ Tuyết rơi dày';
+    case 77: return '❄️ Hạt tuyết';
+    case 80: return '🌧️ Mưa phùn ngắt quãng';
+    case 81: return '🌧️ Mưa rào vừa';
+    case 82: return '🌧️ Mưa rào rất to';
+    case 85: return '❄️ Tuyết rơi ngắt quãng nhẹ';
+    case 86: return '❄️ Tuyết rơi ngắt quãng nặng';
+    case 95: return '⛈️ Dông bão';
+    case 96: return '⛈️ Dông kèm mưa đá nhẹ';
+    case 99: return '⛈️ Dông kèm mưa đá rất to';
+    default: return '❓ Chưa rõ trạng thái';
   }
 }
 
@@ -108,7 +108,7 @@ bot.command('weather', async (ctx) => {
     const hourly = response.data.hourly;
 
     if (!hourly || !hourly.time) {
-      throw new Error('Invalid response structure from weather API.');
+      throw new Error('Cấu trúc dữ liệu API thời tiết không hợp lệ.');
     }
 
     // Get current hour local to Asia/Bangkok (Hanoi)
@@ -121,7 +121,7 @@ bot.command('weather', async (ctx) => {
       startIndex = 0;
     }
 
-    let message = `🌤️ *Hanoi Weather Forecast (Next ${hours} Hours)*\n\n`;
+    let message = `🌤️ *Dự báo thời tiết Hà Nội (${hours} giờ tới)*\n\n`;
     const endIndex = Math.min(startIndex + hours, hourly.time.length);
 
     for (let i = startIndex; i < endIndex; i++) {
@@ -132,13 +132,13 @@ bot.command('weather', async (ctx) => {
       const code = hourly.weathercode[i];
       const status = decodeWeatherCode(code);
 
-      message += `🕒 *${timePart}* | 🌡️ *${temp}°C* | 💧 *${rainProb}%* | ${status}\n`;
+      message += `🕒 *${timePart}* | 🌡️ *${temp}°C* | 💧 *Mưa: ${rainProb}%* | ${status}\n`;
     }
 
     await ctx.replyWithMarkdown(message);
   } catch (error) {
     console.error('Weather command error:', error.message);
-    await ctx.reply(`❌ Failed to retrieve weather data: ${error.message}`);
+    await ctx.reply(`❌ Lỗi khi lấy dữ liệu thời tiết: ${error.message}`);
   }
 });
 
@@ -163,7 +163,7 @@ bot.command('getlink', async (ctx) => {
     const linkText = element.text().trim();
 
     if (!href) {
-      return ctx.reply('⚠️ No link found matching the selector `a.latest-link` on the target website.');
+      return ctx.reply('⚠️ Không tìm thấy liên kết nào khớp với selector `a.latest-link` trên trang web.');
     }
 
     // Resolve relative URL if needed
@@ -172,14 +172,14 @@ bot.command('getlink', async (ctx) => {
       absoluteUrl = new URL(href, targetUrl).href;
     }
 
-    const message = `🔗 *Latest Domain Link*\n\n` +
-                    `• *Text:* ${linkText || 'N/A'}\n` +
-                    `• *URL:* ${absoluteUrl}`;
+    const message = `🔗 *Liên kết tên miền mới nhất*\n\n` +
+                    `• *Tiêu đề:* ${linkText || 'N/A'}\n` +
+                    `• *Đường dẫn:* ${absoluteUrl}`;
 
     await ctx.replyWithMarkdown(message);
   } catch (error) {
     console.error('Scraping command error:', error.message);
-    await ctx.reply(`❌ Failed to scrape the domain link: ${error.message}`);
+    await ctx.reply(`❌ Lỗi khi quét tên miền mới nhất: ${error.message}`);
   }
 });
 
@@ -190,11 +190,11 @@ bot.command('search', async (ctx) => {
     const query = text.substring(7).trim(); // Remove "/search"
 
     if (!query) {
-      return ctx.reply('⚠️ Please provide a query. Usage: /search <keyword>');
+      return ctx.reply('⚠️ Vui lòng nhập từ khóa tìm kiếm. Ví dụ: /search Hà Nội');
     }
 
     // Inform user search is in progress
-    const statusMsg = await ctx.reply('🔍 Searching...');
+    const statusMsg = await ctx.reply('🔍 Đang tìm kiếm...');
 
     let ddgAbstract = '';
     let ddgUrl = '';
@@ -236,18 +236,18 @@ bot.command('search', async (ctx) => {
     }
 
     // Format message
-    let message = `🔍 *Search Results for:* \`${query}\`\n\n`;
+    let message = `🔍 *Kết quả tìm kiếm cho:* \`${query}\`\n\n`;
     if (ddgAbstract) {
-      message += `💡 *Instant Answer:*\n${ddgAbstract}\n🔗 [Source](${ddgUrl})\n\n`;
+      message += `💡 *Câu trả lời nhanh:*\n${ddgAbstract}\n🔗 [Nguồn](${ddgUrl})\n\n`;
     }
 
     if (wikiResults.length > 0) {
-      message += `📚 *Related Articles (Wikipedia):*\n`;
+      message += `📚 *Bài viết liên quan (Wikipedia):*\n`;
       wikiResults.forEach((r) => {
         message += `• *[${r.title}](${r.url})*\n  ${r.snippet}...\n`;
       });
     } else if (!ddgAbstract) {
-      message += `⚠️ No search results found for this query.`;
+      message += `⚠️ Không tìm thấy kết quả tìm kiếm nào cho từ khóa này.`;
     }
 
     // Delete status message and reply with actual results
@@ -260,7 +260,7 @@ bot.command('search', async (ctx) => {
     await ctx.replyWithMarkdown(message);
   } catch (error) {
     console.error('Search command error:', error.message);
-    await ctx.reply(`❌ Failed to perform search: ${error.message}`);
+    await ctx.reply(`❌ Lỗi hệ thống khi tìm kiếm: ${error.message}`);
   }
 });
 
