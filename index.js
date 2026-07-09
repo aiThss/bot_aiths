@@ -2,7 +2,29 @@ const express = require('express');
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const dns = require('dns');
+const http = require('http');
+const https = require('https');
 require('dotenv').config();
+
+// Bypass ISP DNS blocking by using Google and Cloudflare DNS
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+
+const customLookup = (hostname, options, callback) => {
+  dns.resolve4(hostname, (err, addresses) => {
+    if (err || !addresses || addresses.length === 0) {
+      dns.lookup(hostname, options, callback);
+    } else {
+      callback(null, addresses[0], 4);
+    }
+  });
+};
+
+const httpAgent = new http.Agent({ lookup: customLookup });
+const httpsAgent = new https.Agent({ lookup: customLookup });
+
+axios.defaults.httpAgent = httpAgent;
+axios.defaults.httpsAgent = httpsAgent;
 
 // Validate required environment variables
 const BOT_TOKEN = process.env.BOT_TOKEN;
