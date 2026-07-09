@@ -188,6 +188,15 @@ bot.command('getlink', async (ctx) => {
       targetUrl = 'https://' + target;
     }
 
+    let hostname = '';
+    try {
+      hostname = new URL(targetUrl).hostname;
+    } catch (_) {
+      hostname = targetUrl.replace(/https?:\/\//, '').split('/')[0];
+    }
+    // brand name is the domain without TLD (e.g. sextop1.am -> sextop1)
+    const brandName = hostname.split('.')[0].toLowerCase();
+
     const statusMsg = await ctx.reply(`🔍 Đang quét liên kết từ: ${targetUrl}...`);
 
     const response = await axios.get(targetUrl, {
@@ -201,7 +210,10 @@ bot.command('getlink', async (ctx) => {
 
     const html = response.data;
     const $ = cheerio.load(html);
-    const links = [];
+    
+    const mirrors = [];
+    const external = [];
+    const internal = [];
 
     // 1. Scrape standard <a> tags
     $('a').each((i, el) => {
@@ -214,7 +226,23 @@ bot.command('getlink', async (ctx) => {
             absoluteUrl = new URL(href, targetUrl).href;
           } catch (_) {}
         }
-        links.push({ title: linkText || 'Liên kết', url: absoluteUrl });
+        
+        try {
+          const parsedUrl = new URL(absoluteUrl);
+          const linkHost = parsedUrl.hostname.toLowerCase();
+          
+          if (linkHost === hostname.toLowerCase()) {
+            internal.push({ title: linkText || 'Trang trong', url: absoluteUrl });
+          } else if (linkHost.includes(brandName)) {
+            mirrors.push({ title: linkText || `Tên miền phụ (${linkHost})`, url: absoluteUrl });
+          } else {
+            external.push({ title: linkText || `Liên kết ngoài (${linkHost})`, url: absoluteUrl });
+          }
+        } catch (_) {
+          if (absoluteUrl.includes('t.me') || absoluteUrl.includes('telegram')) {
+            external.push({ title: linkText || 'Kênh Telegram', url: absoluteUrl });
+          }
+        }
       }
     });
 
@@ -227,7 +255,7 @@ bot.command('getlink', async (ctx) => {
       foundHosts.add(match[1]);
     }
 
-    const domainRegex = /[a-zA-Z0-9-]+\.(com|net|org|xyz|bike|info|club|cc|me|top|vip|us|live|tv)/g;
+    const domainRegex = /[a-zA-Z0-9-]+\.(com|net|org|xyz|bike|info|club|cc|me|top|vip|us|live|tv|tokyo|am)/g;
     while ((match = domainRegex.exec(scripts)) !== null) {
       foundHosts.add(match[0]);
     }
@@ -238,38 +266,72 @@ bot.command('getlink', async (ctx) => {
                          cleanHost.includes('facebook') || 
                          cleanHost.includes('navigator') || 
                          cleanHost.includes('sw.js') ||
-                         targetUrl.toLowerCase().includes(cleanHost);
+                         hostname.toLowerCase().includes(cleanHost);
                          
       if (!isExcluded) {
-        links.push({ title: `Cổng truy cập (${cleanHost})`, url: `https://${cleanHost}` });
+        if (cleanHost.includes(brandName)) {
+          mirrors.push({ title: `Cổng dự phòng (${cleanHost})`, url: `https://${cleanHost}` });
+        } else {
+          external.push({ title: `Liên kết ngoài (${cleanHost})`, url: `https://${cleanHost}` });
+        }
       }
     });
 
-    // Deduplicate links
-    const uniqueLinks = [];
-    const seenUrls = new Set();
-    for (const item of links) {
-      if (!seenUrls.has(item.url)) {
-        seenUrls.add(item.url);
-        uniqueLinks.push(item);
-      }
-    }
+    // Deduplicate helper
+    const deduplicate = (arr) => {
+      const seen = new Set();
+      return arr.filter(item => {
+        const key = item.url.toLowerCase().replace(/\/$/, '');
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    const uniqueMirrors = deduplicate(mirrors);
+    const uniqueExternal = deduplicate(external);
+    const uniqueInternal = deduplicate(internal);
 
     await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
 
-    if (uniqueLinks.length === 0) {
-      return ctx.reply(`⚠️ Không tìm thấy liên kết hoặc cổng truy cập nào trên trang web ${targetUrl}`);
+    if (uniqueMirrors.length === 0 && uniqueExternal.length === 0 && uniqueInternal.length === 0) {
+      return ctx.reply(`⚠️ Không tìm thấy bất kỳ liên kết nào trên trang web ${targetUrl}`);
     }
 
-    // Limit to top 10 links
-    const displayLinks = uniqueLinks.slice(0, 10);
-    let message = `🔗 *Các liên kết tìm thấy từ:* \`${targetUrl}\`\n\n`;
-    displayLinks.forEach((item, index) => {
-      message += `${index + 1}. *[${item.title}](${item.url})*\n   └─ \`${item.url}\`\n`;
-    });
+    let message = `🔗 *Kết quả quét từ:* \`${targetUrl}\`\n\n`;
 
-    if (uniqueLinks.length > 10) {
-      message += `\n*...và ${uniqueLinks.length - 10} liên kết khác.*`;
+    // 1. Show Mirrors (High priority)
+    if (uniqueMirrors.length > 0) {
+      message += `🌐 *Cổng truy cập dự phòng / Tên miền khác:* \n`;
+      uniqueMirrors.forEach((item, index) => {
+        message += `${index + 1}. *[${item.title}](${item.url})*\n   └─ \`${item.url}\`\n`;
+      });
+      message += `\n`;
+    }
+
+    // 2. Show External/Social links (Telegram/Discord etc.)
+    if (uniqueExternal.length > 0) {
+      message += `📢 *Mạng xã hội & Liên kết ngoài liên quan:* \n`;
+      uniqueExternal.forEach((item, index) => {
+        message += `• *[${item.title}](${item.url})*\n  └─ \`${item.url}\`\n`;
+      });
+      message += `\n`;
+    }
+
+    // 3. Show internal links only if no mirrors/externals found or show maximum of 3 as preview
+    if (uniqueMirrors.length === 0 && uniqueExternal.length === 0) {
+      if (uniqueInternal.length > 0) {
+        message += `🏠 *Các liên kết trong trang:* \n`;
+        uniqueInternal.slice(0, 10).forEach((item, index) => {
+          message += `• *[${item.title}](${item.url})*\n`;
+        });
+        if (uniqueInternal.length > 10) {
+          message += `_...và ${uniqueInternal.length - 10} liên kết khác._\n`;
+        }
+      }
+    } else if (uniqueInternal.length > 0) {
+      // Show summary of internal links
+      message += `🏠 _Tìm thấy ${uniqueInternal.length} liên kết chuyên mục/phim trong trang._\n`;
     }
 
     await ctx.replyWithMarkdown(message);
