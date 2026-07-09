@@ -13,6 +13,10 @@ if (!BOT_TOKEN || !ADMIN_CHAT_ID) {
   process.exit(1);
 }
 
+// Optional Google Custom Search Keys
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+const GOOGLE_CSE_ID = process.env.GOOGLE_CSE_ID;
+
 // ----------------------------------------------------
 // Express Setup
 // ----------------------------------------------------
@@ -196,10 +200,36 @@ bot.command('search', async (ctx) => {
     // Inform user search is in progress
     const statusMsg = await ctx.reply('🔍 Đang tìm kiếm...');
 
+    // ----------------------------------------------------
+    // Method 1: Google Custom Search API (If Keys provided)
+    // ----------------------------------------------------
+    if (GOOGLE_API_KEY && GOOGLE_CSE_ID) {
+      try {
+        console.log(`Searching Google for query: "${query}"`);
+        const googleUrl = `https://www.googleapis.com/customsearch/v1?q=${encodeURIComponent(query)}&key=${GOOGLE_API_KEY}&cx=${GOOGLE_CSE_ID}&num=3`;
+        const googleRes = await axios.get(googleUrl, { timeout: 5000 });
+
+        if (googleRes.data && googleRes.data.items && googleRes.data.items.length > 0) {
+          let message = `🔍 *Kết quả tìm kiếm Google cho:* \`${query}\`\n\n`;
+          googleRes.data.items.forEach((item) => {
+            message += `• *[${item.title}](${item.link})*\n  ${item.snippet || 'Không có mô tả.'}\n`;
+          });
+
+          await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+          return await ctx.replyWithMarkdown(message);
+        }
+      } catch (err) {
+        console.warn('Google Search API failed, falling back to Wikipedia/DDG:', err.message);
+      }
+    }
+
+    // ----------------------------------------------------
+    // Method 2: Fallback to Wikipedia + DuckDuckGo Instant Answer
+    // ----------------------------------------------------
     let ddgAbstract = '';
     let ddgUrl = '';
     
-    // 1. Try DuckDuckGo Instant Answer
+    // Try DuckDuckGo Instant Answer
     try {
       const ddgRes = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
@@ -213,7 +243,7 @@ bot.command('search', async (ctx) => {
       console.warn('DDG Search warning:', err.message);
     }
 
-    // 2. Try Wikipedia Full-Text Search
+    // Try Wikipedia Full-Text Search
     let wikiResults = [];
     try {
       const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`, {
@@ -235,7 +265,7 @@ bot.command('search', async (ctx) => {
       console.warn('Wikipedia Search warning:', err.message);
     }
 
-    // Format message
+    // Format fallback message
     let message = `🔍 *Kết quả tìm kiếm cho:* \`${query}\`\n\n`;
     if (ddgAbstract) {
       message += `💡 *Câu trả lời nhanh:*\n${ddgAbstract}\n🔗 [Nguồn](${ddgUrl})\n\n`;
@@ -252,7 +282,7 @@ bot.command('search', async (ctx) => {
 
     // Delete status message and reply with actual results
     try {
-      await ctx.deleteMessage(statusMsg.message_id);
+      await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
     } catch (err) {
       // Ignore if message deletion fails
     }
