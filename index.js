@@ -146,44 +146,114 @@ bot.command('weather', async (ctx) => {
   }
 });
 
-// Command: /getlink
+// Command: /getlink <url/domain>
 bot.command('getlink', async (ctx) => {
   try {
-    // Replace with your target blocked website
-    const targetUrl = 'https://example.com';
+    const text = ctx.message.text.trim();
+    const firstSpaceIndex = text.indexOf(' ');
+    if (firstSpaceIndex === -1) {
+      return ctx.reply('⚠️ Vui lòng nhập tên miền hoặc liên kết. Ví dụ: /getlink hentaiz.to');
+    }
+    
+    let target = text.substring(firstSpaceIndex).trim();
+    if (!target) {
+      return ctx.reply('⚠️ Vui lòng nhập tên miền hoặc liên kết. Ví dụ: /getlink hentaiz.to');
+    }
+
+    // Standardize URL
+    let targetUrl = target;
+    if (!target.startsWith('http://') && !target.startsWith('https://')) {
+      targetUrl = 'https://' + target;
+    }
+
+    const statusMsg = await ctx.reply(`🔍 Đang quét liên kết từ: ${targetUrl}...`);
 
     const response = await axios.get(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8'
       },
       timeout: 10000
     });
 
-    const $ = cheerio.load(response.data);
-    
-    // Replace with your target selector
-    const element = $('a.latest-link');
-    const href = element.attr('href');
-    const linkText = element.text().trim();
+    const html = response.data;
+    const $ = cheerio.load(html);
+    const links = [];
 
-    if (!href) {
-      return ctx.reply('⚠️ Không tìm thấy liên kết nào khớp với selector `a.latest-link` trên trang web.');
+    // 1. Scrape standard <a> tags
+    $('a').each((i, el) => {
+      const href = $(el).attr('href');
+      const linkText = $(el).text().trim();
+      if (href && href !== '#' && href !== 'javascript:void(0)' && !href.startsWith('javascript:')) {
+        let absoluteUrl = href;
+        if (!href.startsWith('http://') && !href.startsWith('https://')) {
+          try {
+            absoluteUrl = new URL(href, targetUrl).href;
+          } catch (_) {}
+        }
+        links.push({ title: linkText || 'Liên kết', url: absoluteUrl });
+      }
+    });
+
+    // 2. Search for domains in scripts (bypass dynamic mirror lists like hentaiz.to)
+    const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
+    const hostRegex = /host:\s*['"]([^'"]+)['"]/g;
+    let match;
+    const foundHosts = new Set();
+    while ((match = hostRegex.exec(scripts)) !== null) {
+      foundHosts.add(match[1]);
     }
 
-    // Resolve relative URL if needed
-    let absoluteUrl = href;
-    if (!href.startsWith('http://') && !href.startsWith('https://')) {
-      absoluteUrl = new URL(href, targetUrl).href;
+    const domainRegex = /[a-zA-Z0-9-]+\.(com|net|org|xyz|bike|info|club|cc|me|top|vip|us|live|tv)/g;
+    while ((match = domainRegex.exec(scripts)) !== null) {
+      foundHosts.add(match[0]);
     }
 
-    const message = `🔗 *Liên kết tên miền mới nhất*\n\n` +
-                    `• *Tiêu đề:* ${linkText || 'N/A'}\n` +
-                    `• *Đường dẫn:* ${absoluteUrl}`;
+    foundHosts.forEach(host => {
+      const cleanHost = host.toLowerCase().trim();
+      const isExcluded = cleanHost.includes('google') || 
+                         cleanHost.includes('facebook') || 
+                         cleanHost.includes('navigator') || 
+                         cleanHost.includes('sw.js') ||
+                         targetUrl.toLowerCase().includes(cleanHost);
+                         
+      if (!isExcluded) {
+        links.push({ title: `Cổng truy cập (${cleanHost})`, url: `https://${cleanHost}` });
+      }
+    });
+
+    // Deduplicate links
+    const uniqueLinks = [];
+    const seenUrls = new Set();
+    for (const item of links) {
+      if (!seenUrls.has(item.url)) {
+        seenUrls.add(item.url);
+        uniqueLinks.push(item);
+      }
+    }
+
+    await ctx.deleteMessage(statusMsg.message_id).catch(() => {});
+
+    if (uniqueLinks.length === 0) {
+      return ctx.reply(`⚠️ Không tìm thấy liên kết hoặc cổng truy cập nào trên trang web ${targetUrl}`);
+    }
+
+    // Limit to top 10 links
+    const displayLinks = uniqueLinks.slice(0, 10);
+    let message = `🔗 *Các liên kết tìm thấy từ:* \`${targetUrl}\`\n\n`;
+    displayLinks.forEach((item, index) => {
+      message += `${index + 1}. *[${item.title}](${item.url})*\n   └─ \`${item.url}\`\n`;
+    });
+
+    if (uniqueLinks.length > 10) {
+      message += `\n*...và ${uniqueLinks.length - 10} liên kết khác.*`;
+    }
 
     await ctx.replyWithMarkdown(message);
   } catch (error) {
     console.error('Scraping command error:', error.message);
-    await ctx.reply(`❌ Lỗi khi quét tên miền mới nhất: ${error.message}`);
+    await ctx.reply(`❌ Lỗi khi quét trang web: ${error.message}\n(Tên miền có thể đang bị chặn hoặc ngoại tuyến)`);
   }
 });
 
@@ -191,7 +261,12 @@ bot.command('getlink', async (ctx) => {
 bot.command('search', async (ctx) => {
   try {
     const text = ctx.message.text.trim();
-    const query = text.substring(7).trim(); // Remove "/search"
+    // Support parsing query robustly (e.g. /search@bot_name query or /search query)
+    const firstSpaceIndex = text.indexOf(' ');
+    if (firstSpaceIndex === -1) {
+      return ctx.reply('⚠️ Vui lòng nhập từ khóa tìm kiếm. Ví dụ: /search Hà Nội');
+    }
+    const query = text.substring(firstSpaceIndex).trim();
 
     if (!query) {
       return ctx.reply('⚠️ Vui lòng nhập từ khóa tìm kiếm. Ví dụ: /search Hà Nội');
@@ -243,23 +318,41 @@ bot.command('search', async (ctx) => {
       console.warn('DDG Search warning:', err.message);
     }
 
-    // Try Wikipedia Full-Text Search
+    // Try Wikipedia Full-Text Search (Search Vietnamese first, then English as fallback)
     let wikiResults = [];
     try {
-      const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
+      // 1. Query Vietnamese Wikipedia
+      const wikiResVi = await axios.get(`https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Bot/1.0' },
         timeout: 5000
       });
-      if (wikiRes.data && wikiRes.data.query && wikiRes.data.query.search) {
-        wikiResults = wikiRes.data.query.search.slice(0, 3).map(item => {
+      if (wikiResVi.data && wikiResVi.data.query && wikiResVi.data.query.search && wikiResVi.data.query.search.length > 0) {
+        wikiResults = wikiResVi.data.query.search.slice(0, 3).map(item => {
           const cleanSnippet = item.snippet.replace(/<\/?[^>]+(>|$)/g, '');
-          const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`;
+          const url = `https://vi.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`;
           return {
             title: item.title,
             snippet: cleanSnippet,
             url: url
           };
         });
+      } else {
+        // 2. Fallback to English Wikipedia
+        const wikiResEn = await axios.get(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Bot/1.0' },
+          timeout: 5000
+        });
+        if (wikiResEn.data && wikiResEn.data.query && wikiResEn.data.query.search) {
+          wikiResults = wikiResEn.data.query.search.slice(0, 3).map(item => {
+            const cleanSnippet = item.snippet.replace(/<\/?[^>]+(>|$)/g, '');
+            const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`;
+            return {
+              title: item.title,
+              snippet: cleanSnippet,
+              url: url
+            };
+          });
+        }
       }
     } catch (err) {
       console.warn('Wikipedia Search warning:', err.message);
