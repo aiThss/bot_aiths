@@ -51,6 +51,11 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+const escapeHtml = (value) => String(value)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
 // Webhook notification endpoint
 app.post('/webhook/pinball', async (req, res) => {
   const { id, title, type } = req.body;
@@ -61,15 +66,29 @@ app.post('/webhook/pinball', async (req, res) => {
 
   try {
     console.log(`Received webhook notification for ID: ${id}`);
-    
-    // Styled markdown notification format in Vietnamese
-    const message = `🔔 *Thông báo mới từ Pinball!*\n\n` +
-                    `• *Mã số:* \`${id}\`\n` +
-                    `• *Khách hàng:* ${title}\n` +
-                    `• *Chi tiết:* ${type}`;
 
-    await bot.telegram.sendMessage(ADMIN_CHAT_ID, message, { parse_mode: 'Markdown' });
-    
+    const customerMatch = title.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+    const detailMatch = type.match(/^(.*?)\s*\(Bởi\s+(.*?)\s+lúc\s+[^)]+\)\s*$/i);
+
+    const customerName = customerMatch ? customerMatch[1].trim() : title.trim();
+    const phone = customerMatch ? customerMatch[2].trim() : 'Không rõ';
+    const rawAction = detailMatch ? detailMatch[1].trim() : type.trim();
+    const staffName = detailMatch ? detailMatch[2].trim() : 'Không rõ';
+    const actionLabel = /^Lấy\b/i.test(rawAction) ? 'Lấy' : 'Gửi';
+    const items = rawAction
+      .split(/\s*\+\s*/)
+      .map((part) => part.replace(/^(Gửi|Lấy)\s+/i, '').trim())
+      .filter(Boolean)
+      .join(', ');
+
+    const message = `🔔 <b>Thông báo mới từ Pinball!</b>\n\n` +
+                    `• <b>Tên khách hàng:</b> ${escapeHtml(customerName)}\n` +
+                    `• <b>Số điện thoại:</b> ${escapeHtml(phone)}\n` +
+                    `• <b>${actionLabel}:</b> ${escapeHtml(items)}\n` +
+                    `• <b>Nhân viên:</b> ${escapeHtml(staffName)}`;
+
+    await bot.telegram.sendMessage(ADMIN_CHAT_ID, message, { parse_mode: 'HTML' });
+
     return res.status(200).json({ success: true, message: 'Notification sent to admin' });
   } catch (error) {
     console.error('Failed to send webhook notification to admin:', error.message);
@@ -176,7 +195,7 @@ bot.command('getlink', async (ctx) => {
     if (firstSpaceIndex === -1) {
       return ctx.reply('⚠️ Vui lòng nhập tên miền hoặc liên kết. Ví dụ: /getlink hentaiz.to');
     }
-    
+
     let target = text.substring(firstSpaceIndex).trim();
     if (!target) {
       return ctx.reply('⚠️ Vui lòng nhập tên miền hoặc liên kết. Ví dụ: /getlink hentaiz.to');
@@ -210,7 +229,7 @@ bot.command('getlink', async (ctx) => {
 
     const html = response.data;
     const $ = cheerio.load(html);
-    
+
     const mirrors = [];
     const external = [];
     const internal = [];
@@ -226,11 +245,11 @@ bot.command('getlink', async (ctx) => {
             absoluteUrl = new URL(href, targetUrl).href;
           } catch (_) {}
         }
-        
+
         try {
           const parsedUrl = new URL(absoluteUrl);
           const linkHost = parsedUrl.hostname.toLowerCase();
-          
+
           if (linkHost === hostname.toLowerCase()) {
             internal.push({ title: linkText || 'Trang trong', url: absoluteUrl });
           } else if (linkHost.includes(brandName)) {
@@ -262,12 +281,12 @@ bot.command('getlink', async (ctx) => {
 
     foundHosts.forEach(host => {
       const cleanHost = host.toLowerCase().trim();
-      const isExcluded = cleanHost.includes('google') || 
-                         cleanHost.includes('facebook') || 
-                         cleanHost.includes('navigator') || 
+      const isExcluded = cleanHost.includes('google') ||
+                         cleanHost.includes('facebook') ||
+                         cleanHost.includes('navigator') ||
                          cleanHost.includes('sw.js') ||
                          hostname.toLowerCase().includes(cleanHost);
-                         
+
       if (!isExcluded) {
         if (cleanHost.includes(brandName)) {
           mirrors.push({ title: `Cổng dự phòng (${cleanHost})`, url: `https://${cleanHost}` });
@@ -387,7 +406,7 @@ bot.command('search', async (ctx) => {
     // ----------------------------------------------------
     let ddgAbstract = '';
     let ddgUrl = '';
-    
+
     // Try DuckDuckGo Instant Answer
     try {
       const ddgRes = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, {
