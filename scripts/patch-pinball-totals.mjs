@@ -69,7 +69,7 @@ function formatPinballTotalLine(totals) {
   source = source.slice(0, routeIndex) + helpers + source.slice(routeIndex);
 }
 
-const totalsLookupMarker = '    const customerTotals = await fetchPinballCustomerTotals(payload);';
+const totalsLookupMarker = '    const customerTotals = await fetchPinballCustomerTotals({ ...payload, phone });';
 if (!source.includes(totalsLookupMarker)) {
   const actionFallback = "if (actionLines.length === 0) actionLines.push('• <b>Thao tác:</b> Không thay đổi thẻ hoặc bi');\n\n";
   if (!source.includes(actionFallback)) {
