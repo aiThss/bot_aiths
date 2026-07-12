@@ -92,14 +92,14 @@ replaceRequired(
   'Không tìm thấy lệnh gửi thông báo Pinball để gửi tới nhiều tài khoản'
 );
 
-if (!source.includes("bot.command('chatid'")) {
+if (!source.includes("bot.command('id'")) {
   const commandMarker = '// Pinball record action callbacks';
   const commandIndex = source.indexOf(commandMarker);
   if (commandIndex === -1) {
-    throw new Error('Không tìm thấy vị trí thêm lệnh /chatid');
+    throw new Error('Không tìm thấy vị trí thêm lệnh /id');
   }
 
-  const chatIdCommand = `bot.command('chatid', async (ctx) => {
+  const idCommand = `bot.command('id', async (ctx) => {
   const chatId = String(ctx.chat?.id || 'Không xác định');
   const userId = String(ctx.from?.id || 'Không xác định');
   const isConfigured = ADMIN_CHAT_IDS.includes(chatId);
@@ -124,28 +124,28 @@ if (!source.includes("bot.command('chatid'")) {
 
 `;
 
-  source = source.slice(0, commandIndex) + chatIdCommand + source.slice(commandIndex);
+  source = source.slice(0, commandIndex) + idCommand + source.slice(commandIndex);
 }
 
 const helpCommandEntry = "  { command: 'help', description: 'Xem hướng dẫn sử dụng bot' }";
-const chatIdCommandEntry = "  { command: 'chatid', description: 'Xem Telegram Chat ID của bạn' },\n" + helpCommandEntry;
-if (!source.includes("{ command: 'chatid'")) {
+const idCommandEntry = "  { command: 'id', description: 'Xem Telegram Chat ID của bạn' },\n" + helpCommandEntry;
+if (!source.includes("{ command: 'id'")) {
   replaceRequired(
     helpCommandEntry,
-    chatIdCommandEntry,
-    'Không tìm thấy menu lệnh Telegram để thêm /chatid'
+    idCommandEntry,
+    'Không tìm thấy menu lệnh Telegram để thêm /id'
   );
 }
 
 const helpWeatherLine = "  '• <b>/weather 6</b> — xem thời tiết 6 giờ tới',";
-const helpChatIdLine = helpWeatherLine + "\n  '• <b>/chatid</b> — xem ID để thêm vào danh sách nhận thông báo',";
-if (!source.includes("<b>/chatid</b>")) {
+const helpIdLine = helpWeatherLine + "\n  '• <b>/id</b> — xem ID để thêm vào danh sách nhận thông báo',";
+if (!source.includes("<b>/id</b>")) {
   replaceRequired(
     helpWeatherLine,
-    helpChatIdLine,
-    'Không tìm thấy nội dung trợ giúp để thêm /chatid'
+    helpIdLine,
+    'Không tìm thấy nội dung trợ giúp để thêm /id'
   );
 }
 
 fs.writeFileSync(indexPath, source, 'utf8');
-console.log('Đã thêm /chatid và hỗ trợ nhiều ADMIN_CHAT_IDS');
+console.log('Đã thêm /id và hỗ trợ nhiều ADMIN_CHAT_IDS');
