@@ -4,8 +4,8 @@
   "description": "Telegram bot with weather, scraper and webhook integrations",
   "main": "index.js",
   "scripts": {
-    "start": "node scripts/patch-pinball-webhook.mjs && node scripts/patch-pinball-actions.mjs && node scripts/patch-pinball-totals.mjs && node scripts/patch-command-input-flow.mjs && node index.js",
-    "dev": "node scripts/patch-pinball-webhook.mjs && node scripts/patch-pinball-actions.mjs && node scripts/patch-pinball-totals.mjs && node scripts/patch-command-input-flow.mjs && node --watch index.js"
+    "start": "node scripts/patch-pinball-webhook.mjs && node scripts/patch-pinball-actions.mjs && node scripts/patch-pinball-totals.mjs && node scripts/patch-command-input-flow.mjs && node scripts/patch-telegram-recipients.mjs && node index.js",
+    "dev": "node scripts/patch-pinball-webhook.mjs && node scripts/patch-pinball-actions.mjs && node scripts/patch-pinball-totals.mjs && node scripts/patch-command-input-flow.mjs && node scripts/patch-telegram-recipients.mjs && node --watch index.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
