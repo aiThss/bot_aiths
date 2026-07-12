@@ -22,11 +22,13 @@ const ADMIN_CHAT_IDS = [...new Set(
     .filter((value) => /^-?\\d+$/.test(value))
 )];`;
 
-replaceRequired(
-  legacyAdminDeclaration,
-  multiAdminDeclaration,
-  'Không tìm thấy khai báo ADMIN_CHAT_ID để hỗ trợ nhiều tài khoản Telegram'
-);
+if (!source.includes('const ADMIN_CHAT_IDS =')) {
+  replaceRequired(
+    legacyAdminDeclaration,
+    multiAdminDeclaration,
+    'Không tìm thấy khai báo ADMIN_CHAT_ID để hỗ trợ nhiều tài khoản Telegram'
+  );
+}
 
 const legacyValidation = `if (!BOT_TOKEN || !ADMIN_CHAT_ID) {
   console.error('CRITICAL: BOT_TOKEN and ADMIN_CHAT_ID must be set in the environment.');
