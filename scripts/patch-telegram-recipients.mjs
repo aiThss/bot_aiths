@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const indexPath = new URL('../index.js', import.meta.url);
-let source = fs.readFileSync(indexPath, 'utf8');
+let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 function replaceRequired(search, replacement, errorMessage) {
   if (!source.includes(search)) {

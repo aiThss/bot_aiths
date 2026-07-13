@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const indexPath = new URL('../index.js', import.meta.url);
-let source = fs.readFileSync(indexPath, 'utf8');
+let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 const routeMarker = "app.post('/webhook/pinball', async (req, res) => {";
 const helperMarker = 'async function fetchPinballCustomerTotals(payload) {';
@@ -45,7 +45,6 @@ async function fetchPinballCustomerTotals(payload) {
   try {
     const endpoint = new URL('/api/deposits', getPinballAppUrl());
     endpoint.searchParams.set('phone', phone);
-    endpoint.searchParams.set('status', 'Đang gửi');
     endpoint.searchParams.set('limit', '1');
 
     const response = await axios.get(endpoint.href, { timeout: 15000 });

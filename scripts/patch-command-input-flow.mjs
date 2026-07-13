@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 
 const indexPath = new URL('../index.js', import.meta.url);
-let source = fs.readFileSync(indexPath, 'utf8');
+let source = fs.readFileSync(indexPath, 'utf8').replace(/\r\n/g, '\n');
 
 if (source.includes('const GETLINK_INPUT_PROMPT')) {
   console.log('Luồng nhập liệu /g và /s đã được áp dụng');
