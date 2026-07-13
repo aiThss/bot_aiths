@@ -157,7 +157,11 @@ bot.action(/^pb:yes:([0-9a-f]{24})$/i, async (ctx) => {
     const response = await deletePinballRecord(recordId);
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
     const customerName = response.data?.fullName ? ' của ' + response.data.fullName : '';
-    return ctx.reply('✅ Đã xoá bản ghi' + customerName + '.');
+    const restoredParts = [];
+    if (response.data?.restoredCards > 0) restoredParts.push(response.data.restoredCards + ' thẻ');
+    if (response.data?.restoredBalls > 0) restoredParts.push(response.data.restoredBalls + ' bi');
+    const restoredText = restoredParts.length ? ' Đã hoàn ' + restoredParts.join(' và ') + ' vào số đang giữ.' : '';
+    return ctx.reply('✅ Đã xoá bản ghi' + customerName + '.' + restoredText);
   } catch (error) {
     console.error('Delete Pinball record failed:', error);
     return ctx.reply('❌ Không xoá được bản ghi: ' + describePinballApiError(error));
