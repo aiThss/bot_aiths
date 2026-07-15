@@ -56,6 +56,63 @@ const escapeHtml = (value) => String(value)
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;');
 
+// Webhook endpoint for Dokploy notifications
+app.post('/webhook/dokploy', async (req, res) => {
+  const { title, message, timestamp } = req.body;
+  console.log('Received Dokploy webhook payload:', JSON.stringify(req.body, null, 2));
+
+  if (!title && !message) {
+    return res.status(400).json({ error: 'Missing title and message in payload' });
+  }
+
+  try {
+    let timeStr = '';
+    try {
+      const date = timestamp ? new Date(timestamp) : new Date();
+      timeStr = date.toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok' });
+    } catch (_) {
+      timeStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok' });
+    }
+
+    let icon = 'ℹ️';
+    const lowerTitle = (title || '').toLowerCase();
+    const lowerMessage = (message || '').toLowerCase();
+    
+    if (lowerTitle.includes('success') || lowerTitle.includes('thành công') || lowerMessage.includes('success')) {
+      icon = '✅';
+    } else if (lowerTitle.includes('fail') || lowerTitle.includes('lỗi') || lowerTitle.includes('error') || lowerMessage.includes('fail') || lowerMessage.includes('error')) {
+      icon = '❌';
+    } else if (lowerTitle.includes('restart') || lowerTitle.includes('khởi động lại')) {
+      icon = '🔄';
+    } else if (lowerTitle.includes('cleanup') || lowerTitle.includes('dọn dẹp')) {
+      icon = '🧹';
+    } else if (lowerTitle.includes('backup') || lowerTitle.includes('sao lưu')) {
+      icon = '💾';
+    } else if (lowerTitle.includes('warning') || lowerTitle.includes('cảnh báo') || lowerTitle.includes('threshold') || lowerTitle.includes('limit')) {
+      icon = '⚠️';
+    }
+
+    const formattedTitle = title ? escapeHtml(title) : 'Thông báo Dokploy';
+    const formattedMessage = message ? escapeHtml(message) : '';
+
+    let telegramMessage = `${icon} <b>[Dokploy] ${formattedTitle}</b>\n\n`;
+    if (formattedMessage) {
+      telegramMessage += `📝 <b>Nội dung:</b>\n${formattedMessage}\n\n`;
+    }
+    telegramMessage += `🕒 <b>Thời gian:</b> ${timeStr}`;
+
+    const chatIds = typeof ADMIN_CHAT_IDS !== 'undefined' ? ADMIN_CHAT_IDS : [ADMIN_CHAT_ID];
+    await Promise.all(
+      chatIds.map(chatId => bot.telegram.sendMessage(chatId, telegramMessage, { parse_mode: 'HTML' }))
+    );
+
+    return res.status(200).json({ success: true, message: 'Notification sent to Telegram' });
+  } catch (error) {
+    console.error('Failed to send Dokploy notification to Telegram:', error.message);
+    return res.status(500).json({ error: 'Failed to send Telegram notification: ' + error.message });
+  }
+});
+
 // Webhook notification endpoint
 app.post('/webhook/pinball', async (req, res) => {
   const { id, title, type } = req.body;
