@@ -57,8 +57,7 @@ const multiAdminAuthorization = `function isAuthorizedPinballAdmin(ctx) {
   return Boolean(
     userId &&
     chatId &&
-    ADMIN_CHAT_IDS.includes(userId) &&
-    ADMIN_CHAT_IDS.includes(chatId)
+    (ADMIN_CHAT_IDS.includes(userId) || ADMIN_CHAT_IDS.includes(chatId))
   );
 }`;
 
