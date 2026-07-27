@@ -523,10 +523,11 @@ function decodeWeatherCode(code) {
   }
 }
 
-// Command: /weather [hours]
-bot.command('weather', async (ctx) => {
+// Command: /weather [hours] or /w [hours]
+async function handleWeather(ctx) {
   try {
-    const args = ctx.message.text.split(' ');
+    const text = String(ctx.message?.text || '').trim();
+    const args = text.split(/\s+/);
     let hours = 6;
     if (args.length > 1) {
       const parsed = parseInt(args[1], 10);
@@ -536,7 +537,7 @@ bot.command('weather', async (ctx) => {
     }
 
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=21.0285&longitude=105.8542&hourly=temperature_2m,precipitation_probability,weathercode&timezone=Asia%2FBangkok';
-    const response = await axios.get(url);
+    const response = await axios.get(url, { timeout: 10000 });
     const hourly = response.data.hourly;
 
     if (!hourly || !hourly.time) {
@@ -572,9 +573,12 @@ bot.command('weather', async (ctx) => {
     console.error('Weather command error:', error.message);
     await ctx.reply(`❌ Lỗi khi lấy dữ liệu thời tiết: ${error.message}`);
   }
-});
+}
 
-// Command: /g <url/domain>
+bot.command('weather', handleWeather);
+bot.command('w', handleWeather);
+
+// Command: /g <url/domain> or /g link <url/domain>
 function getCommandArgument(ctx) {
   const text = String(ctx.message?.text || '').trim();
   const firstSpaceIndex = text.indexOf(' ');
@@ -582,7 +586,18 @@ function getCommandArgument(ctx) {
 }
 
 function normalizeTargetUrl(input) {
-  let target = String(input || '').trim().replace(/\s+/g, '');
+  let target = String(input || '').trim();
+  if (!target) return null;
+
+  // Loại bỏ các từ khóa dư thừa nếu người dùng gõ /g link google.com, /g url google.com, v.v.
+  target = target.replace(/^(?:link|url|getlink|site|web|scan)\s+/i, '').trim();
+
+  // Nếu người dùng chỉ gõ /g link hoặc /g url mà không truyền tên miền
+  if (['link', 'url', 'getlink', 'site', 'web', 'scan'].includes(target.toLowerCase())) {
+    return null;
+  }
+
+  target = target.replace(/\s+/g, '');
   if (!target) return null;
   if (!/^https?:\/\//i.test(target)) target = 'https://' + target;
 
@@ -622,14 +637,15 @@ function describeNetworkError(error) {
 async function fetchWebsite(url) {
   const config = {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'vi,en-US;q=0.9,en;q=0.8'
     },
     timeout: 15000,
     maxRedirects: 8,
     responseType: 'text',
-    validateStatus: (status) => status >= 200 && status < 400
+    validateStatus: (status) => status >= 200 && status < 400,
+    httpsAgent: new https.Agent({ rejectUnauthorized: false })
   };
 
   try {
@@ -655,14 +671,27 @@ async function runGetLink(ctx, target) {
   try {
     targetUrl = normalizeTargetUrl(target);
   } catch (_) {
-    return ctx.reply('⚠️ Tên miền hoặc URL không hợp lệ. Ví dụ: /g google.com');
+    targetUrl = null;
+  }
+
+  if (!targetUrl) {
+    return ctx.reply('⚠️ Tên miền hoặc URL không hợp lệ. Ví dụ: /g google.com hoặc /g link google.com');
   }
 
   const statusMsg = await ctx.reply('🔎 Đang quét liên kết từ: ' + targetUrl.href);
 
   try {
     const response = await fetchWebsite(targetUrl);
-    const finalUrl = new URL(response.request?.res?.responseUrl || targetUrl.href);
+    let finalUrl = targetUrl;
+    try {
+      const respUrl = response.request?.res?.responseUrl;
+      if (respUrl && typeof respUrl === 'string') {
+        finalUrl = new URL(respUrl, targetUrl.href);
+      }
+    } catch (_) {
+      finalUrl = targetUrl;
+    }
+
     const hostname = finalUrl.hostname.toLowerCase().replace(/^www\./, '');
     const brandName = hostname.split('.')[0];
     const $ = cheerio.load(response.data);
@@ -734,14 +763,23 @@ async function runGetLink(ctx, target) {
 }
 
 async function handleGetLink(ctx) {
-  const target = getCommandArgument(ctx);
-  if (target) return runGetLink(ctx, target);
+  const rawTarget = getCommandArgument(ctx);
+  let targetUrl = null;
+  if (rawTarget) {
+    try {
+      targetUrl = normalizeTargetUrl(rawTarget);
+    } catch (_) {
+      targetUrl = null;
+    }
+  }
+
+  if (targetUrl) return runGetLink(ctx, rawTarget);
 
   return ctx.reply(GETLINK_INPUT_PROMPT, {
     reply_markup: {
       force_reply: true,
       selective: true,
-      input_field_placeholder: 'Ví dụ: google.com'
+      input_field_placeholder: 'Ví dụ: google.com hoặc link google.com'
     }
   });
 }
@@ -988,9 +1026,10 @@ bot.on('text', async (ctx, next) => {
 // Bot command menu
 const BOT_COMMANDS = [
   { command: 'c', description: 'Tra cứu thẻ & bi: /c tên/SĐT' },
-  { command: 'g', description: 'Quét liên kết: /g tenmien.com' },
+  { command: 'g', description: 'Quét liên kết: /g tenmien.com hoặc /g link tenmien.com' },
   { command: 's', description: 'Tìm kiếm web: /s từ khóa' },
-  { command: 'weather', description: 'Dự báo thời tiết Hà Nội' },
+  { command: 'w', description: 'Dự báo thời tiết Hà Nội: /w [số giờ]' },
+  { command: 'weather', description: 'Dự báo thời tiết Hà Nội: /weather [số giờ]' },
   { command: 'id', description: 'Xem Telegram Chat ID của bạn' },
   { command: 'help', description: 'Xem hướng dẫn sử dụng bot' }
 ];
@@ -999,9 +1038,9 @@ const helpText = [
   '🤖 <b>Menu chức năng</b>',
   '',
   '• <b>/c tên/SĐT</b> — tra cứu số dư thẻ & bi của khách',
-  '• <b>/g tenmien.com</b> — quét link và tên miền liên quan',
+  '• <b>/g tenmien.com</b> — quét link & tên miền (VD: <code>/g google.com</code> hoặc <code>/g link google.com</code>)',
   '• <b>/s từ khóa</b> — tìm kiếm web',
-  '• <b>/weather 6</b> — xem thời tiết 6 giờ tới',
+  '• <b>/w [số giờ]</b> hoặc <b>/weather [số giờ]</b> — xem thời tiết Hà Nội (mặc định 6 giờ tới, VD: <code>/w 12</code>)',
   '• <b>/id</b> — xem ID để thêm vào danh sách nhận thông báo',
   '',
   'Bạn cũng có thể bấm nút <b>Menu</b> cạnh ô nhập tin nhắn.'
