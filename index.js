@@ -56,10 +56,26 @@ const escapeHtml = (value) => String(value)
 
 // Webhook endpoint for Dokploy notifications
 app.post('/webhook/dokploy', async (req, res) => {
-  const title = req.body.title || req.body.event || req.body.appName || (req.body.status ? `Dokploy ${req.body.status}` : undefined);
-  const message = req.body.message || req.body.description || req.body.text || req.body.details || (typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body));
-  const timestamp = req.body.timestamp || req.body.createdAt || req.body.date;
-  console.log('Received Dokploy webhook payload:', JSON.stringify(req.body, null, 2));
+  const rawBody = req.body || {};
+  console.log('Received Dokploy webhook payload:', JSON.stringify(rawBody, null, 2));
+
+  const title = rawBody.title || rawBody.event || rawBody.appName || (rawBody.status ? `Dokploy ${rawBody.status}` : undefined);
+  const message = rawBody.message || rawBody.description || rawBody.text || rawBody.details || (typeof rawBody === 'object' && Object.keys(rawBody).length > 0 ? JSON.stringify(rawBody) : '');
+  const timestamp = rawBody.timestamp || rawBody.createdAt || rawBody.date;
+
+  // Extract App/Project/Service name from payload or query params
+  const appName = req.query.appName || req.query.serviceName || rawBody.appName || rawBody.applicationName || rawBody.serviceName || rawBody.projectName || rawBody.name || rawBody.application?.name || rawBody.project?.name || null;
+
+  // Extract Website/App URL from payload or query params
+  let appUrl = req.query.appUrl || req.query.url || rawBody.url || rawBody.appUrl || rawBody.applicationUrl || rawBody.domain || rawBody.host || rawBody.application?.url || null;
+
+  // Fallback: search for http/https URL in message or description if not explicitly provided
+  if (!appUrl && typeof message === 'string') {
+    const urlMatch = message.match(/https?:\/\/[^\s"'<>]+/i);
+    if (urlMatch) {
+      appUrl = urlMatch[0];
+    }
+  }
 
   if (!title && !message) {
     return res.status(400).json({ error: 'Missing title and message in payload' });
@@ -74,32 +90,46 @@ app.post('/webhook/dokploy', async (req, res) => {
       timeStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Bangkok' });
     }
 
+    const fullText = `${title || ''} ${message || ''} ${rawBody.status || ''} ${rawBody.event || ''}`.toLowerCase();
+    const isSuccess = /success|thành công|done|ok|completed/i.test(fullText);
+    const isError = /fail|error|lỗi|failed|err/i.test(fullText);
+
     let icon = 'ℹ️';
-    const lowerTitle = (title || '').toLowerCase();
-    const lowerMessage = (message || '').toLowerCase();
-    
-    if (lowerTitle.includes('success') || lowerTitle.includes('thành công') || lowerMessage.includes('success')) {
+    let statusLabel = title ? escapeHtml(title) : 'Thông báo Dokploy';
+
+    if (isSuccess && !isError) {
       icon = '✅';
-    } else if (lowerTitle.includes('fail') || lowerTitle.includes('lỗi') || lowerTitle.includes('error') || lowerMessage.includes('fail') || lowerMessage.includes('error')) {
+    } else if (isError) {
       icon = '❌';
-    } else if (lowerTitle.includes('restart') || lowerTitle.includes('khởi động lại')) {
+    } else if (/restart|khởi động/i.test(fullText)) {
       icon = '🔄';
-    } else if (lowerTitle.includes('cleanup') || lowerTitle.includes('dọn dẹp')) {
-      icon = '🧹';
-    } else if (lowerTitle.includes('backup') || lowerTitle.includes('sao lưu')) {
+    } else if (/backup|sao lưu/i.test(fullText)) {
       icon = '💾';
-    } else if (lowerTitle.includes('warning') || lowerTitle.includes('cảnh báo') || lowerTitle.includes('threshold') || lowerTitle.includes('limit')) {
-      icon = '⚠️';
+    } else if (/cleanup|dọn dẹp/i.test(fullText)) {
+      icon = '🧹';
     }
 
-    const formattedTitle = title ? escapeHtml(title) : 'Thông báo Dokploy';
+    let telegramMessage = `${icon} <b>[Dokploy Deployment]</b> ${statusLabel}\n\n`;
+
+    if (appName) {
+      telegramMessage += `📦 <b>Dự án / Service:</b> <code>${escapeHtml(appName)}</code>\n`;
+    }
+
     const formattedMessage = message ? escapeHtml(message) : '';
-
-    let telegramMessage = `${icon} <b>[Dokploy] ${formattedTitle}</b>\n\n`;
-    if (formattedMessage) {
-      telegramMessage += `📝 <b>Nội dung:</b>\n${formattedMessage}\n\n`;
+    if (formattedMessage && formattedMessage !== statusLabel) {
+      telegramMessage += `📝 <b>Chi tiết:</b>\n${formattedMessage}\n\n`;
     }
+
     telegramMessage += `🕒 <b>Thời gian:</b> ${timeStr}`;
+
+    const telegramOptions = { parse_mode: 'HTML' };
+    if (appUrl && /^https?:\/\//i.test(appUrl)) {
+      telegramOptions.reply_markup = {
+        inline_keyboard: [[
+          { text: '🌐 Mở Website', url: appUrl }
+        ]]
+      };
+    }
 
     const queryChatId = req.query.chatId || req.query.chat_id;
     const targetChatIds = queryChatId
@@ -109,9 +139,12 @@ app.post('/webhook/dokploy', async (req, res) => {
     const deliveryResults = await Promise.allSettled(
       targetChatIds.map(async (chatId) => {
         try {
-          return await bot.telegram.sendMessage(chatId, telegramMessage, { parse_mode: 'HTML' });
+          return await bot.telegram.sendMessage(chatId, telegramMessage, telegramOptions);
         } catch (err) {
-          const plainMessage = `[Dokploy] ${title || 'Thông báo'}\n\n${message || ''}\n\nThời gian: ${timeStr}`;
+          const plainMessage = `${icon} [Dokploy] ${title || 'Thông báo'}\n` +
+            (appName ? `Dự án: ${appName}\n` : '') +
+            `Chi tiết: ${message || ''}\nThời gian: ${timeStr}` +
+            (appUrl ? `\nLink: ${appUrl}` : '');
           return await bot.telegram.sendMessage(chatId, plainMessage);
         }
       })
