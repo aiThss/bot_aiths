@@ -101,10 +101,28 @@ app.post('/webhook/dokploy', async (req, res) => {
     }
     telegramMessage += `🕒 <b>Thời gian:</b> ${timeStr}`;
 
-    const chatIds = typeof ADMIN_CHAT_IDS !== 'undefined' ? ADMIN_CHAT_IDS : [ADMIN_CHAT_ID];
-    await Promise.all(
-      chatIds.map(chatId => bot.telegram.sendMessage(chatId, telegramMessage, { parse_mode: 'HTML' }))
+    const queryChatId = req.query.chatId || req.query.chat_id;
+    const targetChatIds = queryChatId
+      ? [queryChatId]
+      : (typeof ADMIN_CHAT_IDS !== 'undefined' && ADMIN_CHAT_IDS.length > 0 ? ADMIN_CHAT_IDS : [ADMIN_CHAT_ID]);
+
+    const deliveryResults = await Promise.allSettled(
+      targetChatIds.map(async (chatId) => {
+        try {
+          return await bot.telegram.sendMessage(chatId, telegramMessage, { parse_mode: 'HTML' });
+        } catch (err) {
+          const plainMessage = `[Dokploy] ${title || 'Thông báo'}\n\n${message || ''}\n\nThời gian: ${timeStr}`;
+          return await bot.telegram.sendMessage(chatId, plainMessage);
+        }
+      })
     );
+
+    const failedDeliveries = deliveryResults.filter(r => r.status === 'rejected');
+    if (failedDeliveries.length === targetChatIds.length) {
+      const errorReason = failedDeliveries[0]?.reason?.message || 'Chat not found or bot not started';
+      console.error('Dokploy Webhook failed for all recipients:', errorReason);
+      return res.status(500).json({ error: `Failed to send Telegram notification: ${errorReason}` });
+    }
 
     return res.status(200).json({ success: true, message: 'Notification sent to Telegram' });
   } catch (error) {
