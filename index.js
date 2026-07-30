@@ -56,7 +56,9 @@ const escapeHtml = (value) => String(value)
 
 // Webhook endpoint for Dokploy notifications
 app.post('/webhook/dokploy', async (req, res) => {
-  const { title, message, timestamp } = req.body;
+  const title = req.body.title || req.body.event || req.body.appName || (req.body.status ? `Dokploy ${req.body.status}` : undefined);
+  const message = req.body.message || req.body.description || req.body.text || req.body.details || (typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body));
+  const timestamp = req.body.timestamp || req.body.createdAt || req.body.date;
   console.log('Received Dokploy webhook payload:', JSON.stringify(req.body, null, 2));
 
   if (!title && !message) {
