@@ -448,6 +448,16 @@ function getNextDailyPinballReportDelay(now = new Date()) {
   return Math.max(1000, target.getTime() - now.getTime());
 }
 
+function isWithinDailyPinballReportCatchUpWindow(now = new Date()) {
+  const { date } = getPinballReportDateParts(now);
+  const reportTime = new Date(
+    date + 'T' + String(PINBALL_REPORT_HOUR).padStart(2, '0') + ':00:00+07:00'
+  );
+  const catchUpEnd = reportTime.getTime() + 3 * 60 * 60 * 1000;
+
+  return now.getTime() >= reportTime.getTime() && now.getTime() < catchUpEnd;
+}
+
 function formatDailyPinballReport(report) {
   return [
     '📊 <b>Báo cáo Pinball ngày ' + escapeHtml(formatDepositDate(report.date)) + '</b>',
@@ -1178,7 +1188,15 @@ const server = app.listen(PORT, () => {
 // Start Telegraf bot polling
 bot.launch().then(() => {
   console.log('Telegraf bot launched in polling mode');
-  scheduleDailyPinballReport();
+  return (async () => {
+    try {
+      if (isWithinDailyPinballReportCatchUpWindow()) {
+        await sendDailyPinballReport();
+      }
+    } finally {
+      scheduleDailyPinballReport();
+    }
+  })();
 }).catch((err) => {
   console.error('Failed to launch Telegraf bot:', err);
 });
