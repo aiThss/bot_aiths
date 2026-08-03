@@ -418,6 +418,104 @@ app.post('/webhook/pinball', async (req, res) => {
 // ----------------------------------------------------
 const bot = new Telegraf(BOT_TOKEN);
 
+const PINBALL_REPORT_TIME_ZONE = 'Asia/Bangkok';
+const PINBALL_REPORT_HOUR = 22;
+let dailyPinballReportTimer = null;
+
+function getPinballReportDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PINBALL_REPORT_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const getPart = (type) => parts.find((part) => part.type === type)?.value || '';
+
+  return {
+    date: getPart('year') + '-' + getPart('month') + '-' + getPart('day'),
+    displayDate: getPart('day') + '/' + getPart('month') + '/' + getPart('year')
+  };
+}
+
+function getNextDailyPinballReportDelay(now = new Date()) {
+  const { date } = getPinballReportDateParts(now);
+  const target = new Date(date + 'T' + String(PINBALL_REPORT_HOUR).padStart(2, '0') + ':00:00+07:00');
+
+  if (target.getTime() <= now.getTime()) {
+    target.setUTCDate(target.getUTCDate() + 1);
+  }
+
+  return Math.max(1000, target.getTime() - now.getTime());
+}
+
+function formatDailyPinballReport(report) {
+  return [
+    '📊 <b>Báo cáo Pinball ngày ' + escapeHtml(formatDepositDate(report.date)) + '</b>',
+    '',
+    '• Khách đã gửi: <b>' + report.uniqueCustomers + '</b>',
+    '• Lượt ghi nhận: <b>' + report.totalRecords + '</b>',
+    '• Tổng thẻ gửi: <b>' + report.cardsDeposited + '</b>',
+    '• Tổng bi gửi: <b>' + report.ballsDeposited + '</b>'
+  ].join('\n');
+}
+
+async function fetchDailyPinballReport(date) {
+  const endpoint = new URL('/api/bot/daily-report', getPinballAppUrl());
+  endpoint.searchParams.set('date', date);
+  const response = await axios.get(endpoint.href, {
+    headers: { Authorization: 'Bearer ' + BOT_TOKEN },
+    timeout: 15000
+  });
+
+  const report = response.data || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(report.date || ''))) {
+    throw new Error('Pinball trả về dữ liệu báo cáo không hợp lệ.');
+  }
+
+  return {
+    date: report.date,
+    totalRecords: Number(report.totalRecords) || 0,
+    uniqueCustomers: Number(report.uniqueCustomers) || 0,
+    cardsDeposited: Number(report.cardsDeposited) || 0,
+    ballsDeposited: Number(report.ballsDeposited) || 0
+  };
+}
+
+async function sendDailyPinballReport(date = getPinballReportDateParts().date) {
+  const report = await fetchDailyPinballReport(date);
+  const message = formatDailyPinballReport(report);
+  const results = await Promise.allSettled(
+    ADMIN_CHAT_IDS.map((chatId) => bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' }))
+  );
+  const failed = results.filter((result) => result.status === 'rejected');
+
+  failed.forEach((result) => {
+    console.error('Failed to send daily Pinball report:', result.reason?.message || result.reason);
+  });
+
+  if (failed.length === ADMIN_CHAT_IDS.length) {
+    throw failed[0].reason;
+  }
+
+  console.log('Sent daily Pinball report for ' + date);
+  return report;
+}
+
+function scheduleDailyPinballReport() {
+  const delay = getNextDailyPinballReportDelay();
+  console.log('Daily Pinball report scheduled in ' + Math.round(delay / 1000) + ' seconds');
+
+  dailyPinballReportTimer = setTimeout(async () => {
+    try {
+      await sendDailyPinballReport();
+    } catch (error) {
+      console.error('Failed to send daily Pinball report:', describePinballApiError(error));
+    } finally {
+      scheduleDailyPinballReport();
+    }
+  }, delay);
+}
+
 // Weather code decoder helper function (WMO Weather interpretation codes)
 function decodeWeatherCode(code) {
   switch (code) {
@@ -925,6 +1023,20 @@ async function handleCheck(ctx) {
 bot.command('c', handleCheck);
 bot.command('check', handleCheck);
 
+bot.command('baocao', async (ctx) => {
+  if (!isAuthorizedPinballAdmin(ctx)) {
+    return ctx.reply('⚠️ Bạn không có quyền xem báo cáo Pinball.');
+  }
+
+  try {
+    const report = await fetchDailyPinballReport(getPinballReportDateParts().date);
+    return ctx.reply(formatDailyPinballReport(report), { parse_mode: 'HTML' });
+  } catch (error) {
+    console.error('Manual Pinball report failed:', error);
+    return ctx.reply('❌ Không lấy được báo cáo: ' + describePinballApiError(error));
+  }
+});
+
 bot.on('text', async (ctx, next) => {
   const replyText = String(ctx.message?.reply_to_message?.text || '').trim();
   const inputText = String(ctx.message?.text || '').trim();
@@ -956,6 +1068,7 @@ bot.on('text', async (ctx, next) => {
 // Bot command menu
 const BOT_COMMANDS = [
   { command: 'c', description: 'Tra cứu thẻ & bi: /c tên/SĐT' },
+  { command: 'baocao', description: 'Xem báo cáo thẻ & bi gửi hôm nay' },
   { command: 'g', description: 'Quét liên kết: /g tenmien.com hoặc /g link tenmien.com' },
   { command: 's', description: 'Tìm kiếm web: /s từ khóa' },
   { command: 'w', description: 'Dự báo thời tiết Hà Nội: /w [số giờ]' },
@@ -968,6 +1081,7 @@ const helpText = [
   '🤖 <b>Menu chức năng</b>',
   '',
   '• <b>/c tên/SĐT</b> — tra cứu số dư thẻ & bi của khách',
+  '• <b>/baocao</b> — xem tổng thẻ & bi khách đã gửi hôm nay',
   '• <b>/g tenmien.com</b> — quét link & tên miền (VD: <code>/g google.com</code> hoặc <code>/g link google.com</code>)',
   '• <b>/s từ khóa</b> — tìm kiếm web',
   '• <b>/w [số giờ]</b> hoặc <b>/weather [số giờ]</b> — xem thời tiết Hà Nội (mặc định 6 giờ tới, VD: <code>/w 12</code>)',
@@ -1064,6 +1178,7 @@ const server = app.listen(PORT, () => {
 // Start Telegraf bot polling
 bot.launch().then(() => {
   console.log('Telegraf bot launched in polling mode');
+  scheduleDailyPinballReport();
 }).catch((err) => {
   console.error('Failed to launch Telegraf bot:', err);
 });
@@ -1071,6 +1186,7 @@ bot.launch().then(() => {
 // Handle graceful shutdown
 const gracefulShutdown = (signal) => {
   console.log(`${signal} received. Shutting down gracefully...`);
+  if (dailyPinballReportTimer) clearTimeout(dailyPinballReportTimer);
   bot.stop(signal);
   server.close(() => {
     console.log('HTTP server closed.');
