@@ -458,15 +458,35 @@ function isWithinDailyPinballReportCatchUpWindow(now = new Date()) {
   return now.getTime() >= reportTime.getTime() && now.getTime() < catchUpEnd;
 }
 
-function formatDailyPinballReport(report) {
-  return [
+function formatDailyPinballReports(report) {
+  const summary = [
     '📊 <b>Báo cáo Pinball ngày ' + escapeHtml(formatDepositDate(report.date)) + '</b>',
     '',
     '• Khách đã gửi: <b>' + report.uniqueCustomers + '</b>',
     '• Lượt ghi nhận: <b>' + report.totalRecords + '</b>',
     '• Tổng thẻ gửi: <b>' + report.cardsDeposited + '</b>',
-    '• Tổng bi gửi: <b>' + report.ballsDeposited + '</b>'
+    '• Tổng bi gửi: <b>' + report.ballsDeposited + '</b>',
+    '',
+    '<b>Chi tiết khách:</b>'
   ].join('\n');
+  const customerLines = report.customers.map((customer) =>
+    '• ' + escapeHtml(customer.fullName) + ': <b>' + customer.cardsDeposited + '</b> thẻ, <b>' + customer.ballsDeposited + '</b> bi'
+  );
+
+  if (customerLines.length === 0) return [summary + '\n• Không có lượt gửi'];
+
+  const messages = [];
+  let message = summary;
+  customerLines.forEach((line) => {
+    if ((message + '\n' + line).length > 3900) {
+      messages.push(message);
+      message = '<b>Chi tiết khách (tiếp):</b>\n' + line;
+      return;
+    }
+    message += '\n' + line;
+  });
+  messages.push(message);
+  return messages;
 }
 
 async function fetchDailyPinballReport(date) {
@@ -487,15 +507,26 @@ async function fetchDailyPinballReport(date) {
     totalRecords: Number(report.totalRecords) || 0,
     uniqueCustomers: Number(report.uniqueCustomers) || 0,
     cardsDeposited: Number(report.cardsDeposited) || 0,
-    ballsDeposited: Number(report.ballsDeposited) || 0
+    ballsDeposited: Number(report.ballsDeposited) || 0,
+    customers: Array.isArray(report.customers)
+      ? report.customers.map((customer) => ({
+        fullName: String(customer?.fullName || 'Không rõ'),
+        cardsDeposited: Number(customer?.cardsDeposited) || 0,
+        ballsDeposited: Number(customer?.ballsDeposited) || 0
+      }))
+      : []
   };
 }
 
 async function sendDailyPinballReport(date = getPinballReportDateParts().date) {
   const report = await fetchDailyPinballReport(date);
-  const message = formatDailyPinballReport(report);
+  const messages = formatDailyPinballReports(report);
   const results = await Promise.allSettled(
-    ADMIN_CHAT_IDS.map((chatId) => bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' }))
+    ADMIN_CHAT_IDS.map(async (chatId) => {
+      for (const message of messages) {
+        await bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' });
+      }
+    })
   );
   const failed = results.filter((result) => result.status === 'rejected');
 
@@ -1040,7 +1071,9 @@ bot.command('baocao', async (ctx) => {
 
   try {
     const report = await fetchDailyPinballReport(getPinballReportDateParts().date);
-    return ctx.reply(formatDailyPinballReport(report), { parse_mode: 'HTML' });
+    for (const message of formatDailyPinballReports(report)) {
+      await ctx.reply(message, { parse_mode: 'HTML' });
+    }
   } catch (error) {
     console.error('Manual Pinball report failed:', error);
     return ctx.reply('❌ Không lấy được báo cáo: ' + describePinballApiError(error));
