@@ -5,6 +5,8 @@ const cheerio = require('cheerio');
 const dns = require('dns');
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // DNS configuration
@@ -420,6 +422,9 @@ const bot = new Telegraf(BOT_TOKEN);
 
 const PINBALL_REPORT_TIME_ZONE = 'Asia/Bangkok';
 const PINBALL_REPORT_HOUR = 22;
+const PINBALL_REPORT_RETRY_DELAY_MS = 5 * 60 * 1000;
+const PINBALL_REPORT_STATE_FILE = process.env.PINBALL_REPORT_STATE_FILE ||
+  '/app/data/pinball-daily-report-state.json';
 let dailyPinballReportTimer = null;
 
 function getPinballReportDateParts(date = new Date()) {
@@ -448,14 +453,61 @@ function getNextDailyPinballReportDelay(now = new Date()) {
   return Math.max(1000, target.getTime() - now.getTime());
 }
 
-function isWithinDailyPinballReportCatchUpWindow(now = new Date()) {
-  const { date } = getPinballReportDateParts(now);
-  const reportTime = new Date(
+function getPinballReportDeadline(date) {
+  return new Date(
     date + 'T' + String(PINBALL_REPORT_HOUR).padStart(2, '0') + ':00:00+07:00'
   );
-  const catchUpEnd = reportTime.getTime() + 3 * 60 * 60 * 1000;
+}
 
-  return now.getTime() >= reportTime.getTime() && now.getTime() < catchUpEnd;
+function getPreviousPinballReportDate(date) {
+  return getPinballReportDateParts(
+    new Date(getPinballReportDeadline(date).getTime() - 24 * 60 * 60 * 1000)
+  ).date;
+}
+
+function getMostRecentlyCompletedPinballReportDate(now = new Date()) {
+  const { date } = getPinballReportDateParts(now);
+  return now.getTime() >= getPinballReportDeadline(date).getTime()
+    ? date
+    : getPreviousPinballReportDate(date);
+}
+
+function readDailyPinballReportState() {
+  try {
+    const rawState = fs.readFileSync(PINBALL_REPORT_STATE_FILE, 'utf8');
+    const state = JSON.parse(rawState);
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(state?.lastSentDate || ''))
+      ? { lastSentDate: state.lastSentDate }
+      : {};
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.warn('Could not read Pinball report state:', error.message);
+    }
+    return {};
+  }
+}
+
+function saveDailyPinballReportState(state) {
+  const directory = path.dirname(PINBALL_REPORT_STATE_FILE);
+  const temporaryFile = PINBALL_REPORT_STATE_FILE + '.tmp';
+
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(temporaryFile, JSON.stringify(state) + '\n', 'utf8');
+  fs.renameSync(temporaryFile, PINBALL_REPORT_STATE_FILE);
+}
+
+async function sendMissedDailyPinballReportIfNeeded(now = new Date()) {
+  const date = getMostRecentlyCompletedPinballReportDate(now);
+  const state = readDailyPinballReportState();
+
+  if (state.lastSentDate === date) {
+    console.log('Daily Pinball report for ' + date + ' was already sent.');
+    return null;
+  }
+
+  const report = await sendDailyPinballReport(date);
+  saveDailyPinballReportState({ lastSentDate: date });
+  return report;
 }
 
 function formatDailyPinballReports(report) {
@@ -542,18 +594,18 @@ async function sendDailyPinballReport(date = getPinballReportDateParts().date) {
   return report;
 }
 
-function scheduleDailyPinballReport() {
-  const delay = getNextDailyPinballReportDelay();
+function scheduleDailyPinballReport(delay = getNextDailyPinballReportDelay()) {
+  if (dailyPinballReportTimer) clearTimeout(dailyPinballReportTimer);
   console.log('Daily Pinball report scheduled in ' + Math.round(delay / 1000) + ' seconds');
 
   dailyPinballReportTimer = setTimeout(async () => {
     try {
-      await sendDailyPinballReport();
+      await sendMissedDailyPinballReportIfNeeded();
     } catch (error) {
       console.error('Failed to send daily Pinball report:', describePinballApiError(error));
-    } finally {
-      scheduleDailyPinballReport();
+      return scheduleDailyPinballReport(PINBALL_REPORT_RETRY_DELAY_MS);
     }
+    scheduleDailyPinballReport();
   }, delay);
 }
 
@@ -1064,13 +1116,45 @@ async function handleCheck(ctx) {
 bot.command('c', handleCheck);
 bot.command('check', handleCheck);
 
+function isValidPinballReportDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const parsed = new Date(date + 'T00:00:00+07:00');
+  return !Number.isNaN(parsed.getTime()) && getPinballReportDateParts(parsed).date === date;
+}
+
+function getRequestedPinballReportDate(argument, now = new Date()) {
+  const normalizedArgument = String(argument || '').trim().toLowerCase();
+  const today = getPinballReportDateParts(now).date;
+
+  if (!normalizedArgument) return getMostRecentlyCompletedPinballReportDate(now);
+  if (['hom nay', 'hôm nay', 'today'].includes(normalizedArgument)) return today;
+  if (['hom qua', 'hôm qua', 'yesterday'].includes(normalizedArgument)) {
+    return getPreviousPinballReportDate(today);
+  }
+
+  const vietnameseDate = normalizedArgument.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const date = vietnameseDate
+    ? vietnameseDate[3] + '-' + vietnameseDate[2].padStart(2, '0') + '-' + vietnameseDate[1].padStart(2, '0')
+    : normalizedArgument;
+
+  return isValidPinballReportDate(date) ? date : null;
+}
+
 bot.command('baocao', async (ctx) => {
   if (!isAuthorizedPinballAdmin(ctx)) {
     return ctx.reply('⚠️ Bạn không có quyền xem báo cáo Pinball.');
   }
 
+  const reportDate = getRequestedPinballReportDate(getCommandArgument(ctx));
+  if (!reportDate) {
+    return ctx.reply([
+      '⚠️ Ngày báo cáo chưa đúng.',
+      'Dùng: <code>/baocao</code>, <code>/baocao hôm nay</code>, <code>/baocao hôm qua</code> hoặc <code>/baocao 04/08/2026</code>.'
+    ].join('\n'), { parse_mode: 'HTML' });
+  }
+
   try {
-    const report = await fetchDailyPinballReport(getPinballReportDateParts().date);
+    const report = await fetchDailyPinballReport(reportDate);
     for (const message of formatDailyPinballReports(report)) {
       await ctx.reply(message, { parse_mode: 'HTML' });
     }
@@ -1111,7 +1195,7 @@ bot.on('text', async (ctx, next) => {
 // Bot command menu
 const BOT_COMMANDS = [
   { command: 'c', description: 'Tra cứu thẻ & bi: /c tên/SĐT' },
-  { command: 'baocao', description: 'Xem báo cáo thẻ & bi gửi hôm nay' },
+  { command: 'baocao', description: 'Xem báo cáo ngày đã chốt hoặc chọn ngày' },
   { command: 'g', description: 'Quét liên kết: /g tenmien.com hoặc /g link tenmien.com' },
   { command: 's', description: 'Tìm kiếm web: /s từ khóa' },
   { command: 'w', description: 'Dự báo thời tiết Hà Nội: /w [số giờ]' },
@@ -1124,7 +1208,8 @@ const helpText = [
   '🤖 <b>Menu chức năng</b>',
   '',
   '• <b>/c tên/SĐT</b> — tra cứu số dư thẻ & bi của khách',
-  '• <b>/baocao</b> — xem tổng thẻ & bi khách đã gửi hôm nay',
+  '• <b>/baocao</b> — xem báo cáo ngày đã chốt gần nhất',
+  '  Dùng <code>/baocao hôm nay</code>, <code>/baocao hôm qua</code> hoặc <code>/baocao 04/08/2026</code> để chọn ngày',
   '• <b>/g tenmien.com</b> — quét link & tên miền (VD: <code>/g google.com</code> hoặc <code>/g link google.com</code>)',
   '• <b>/s từ khóa</b> — tìm kiếm web',
   '• <b>/w [số giờ]</b> hoặc <b>/weather [số giờ]</b> — xem thời tiết Hà Nội (mặc định 6 giờ tới, VD: <code>/w 12</code>)',
@@ -1223,9 +1308,9 @@ bot.launch().then(() => {
   console.log('Telegraf bot launched in polling mode');
   return (async () => {
     try {
-      if (isWithinDailyPinballReportCatchUpWindow()) {
-        await sendDailyPinballReport();
-      }
+      await sendMissedDailyPinballReportIfNeeded();
+    } catch (error) {
+      console.error('Failed to recover missed daily Pinball report:', describePinballApiError(error));
     } finally {
       scheduleDailyPinballReport();
     }
