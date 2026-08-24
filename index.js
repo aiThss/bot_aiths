@@ -234,6 +234,41 @@ function buildPinballActionKeyboard(id) {
   };
 }
 
+function buildPinballUpdateActionKeyboard(id, historyId) {
+  const recordId = String(id || '').trim();
+  const updateId = String(historyId || '').trim();
+  if (
+    !/^[0-9a-f]{24}$/i.test(recordId) ||
+    !/^[0-9a-f]{24}$/i.test(updateId)
+  ) return {};
+
+  const miniAppUrl = new URL('/telegram/record', getPinballAppUrl());
+  miniAppUrl.searchParams.set('record', recordId);
+
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: '✏️ Cập nhật', web_app: { url: miniAppUrl.href } },
+          { text: '↩️ Xoá thay đổi', callback_data: 'pb:undo:' + recordId + ':' + updateId }
+        ],
+        [
+          { text: '🗑️ Xoá bản ghi', callback_data: 'pb:del:' + recordId }
+        ]
+      ]
+    }
+  };
+}
+
+function buildPinballUpdateUndoConfirmKeyboard(id, historyId) {
+  return {
+    inline_keyboard: [[
+      { text: 'Huỷ', callback_data: 'pb:undo-no:' + id + ':' + historyId },
+      { text: 'Xác nhận xoá thay đổi', callback_data: 'pb:undo-yes:' + id + ':' + historyId }
+    ]]
+  };
+}
+
 function buildPinballDeleteConfirmKeyboard(id) {
   return {
     inline_keyboard: [[
@@ -260,6 +295,17 @@ function describePinballApiError(error) {
 
 async function deletePinballRecord(id) {
   const endpoint = new URL('/api/bot/deposits/' + id, getPinballAppUrl());
+  return axios.delete(endpoint.href, {
+    headers: { Authorization: 'Bearer ' + BOT_TOKEN },
+    timeout: 15000
+  });
+}
+
+async function undoPinballUpdate(id, historyId) {
+  const endpoint = new URL(
+    '/api/bot/deposits/' + id + '/history/' + historyId,
+    getPinballAppUrl()
+  );
   return axios.delete(endpoint.href, {
     headers: { Authorization: 'Bearer ' + BOT_TOKEN },
     timeout: 15000
@@ -330,6 +376,62 @@ app.post('/webhook/pinball', async (req, res) => {
 
   if (!hasStructuredPayload && !hasLegacyPayload) {
     return res.status(400).json({ error: 'Missing required Pinball webhook fields' });
+  }
+
+  const isUpdatePayload = String(payload.event || '').trim().toUpperCase() === 'UPDATE';
+  if (isUpdatePayload) {
+    if (
+      !hasStructuredPayload ||
+      !/^[0-9a-f]{24}$/i.test(String(payload.id || '')) ||
+      !/^[0-9a-f]{24}$/i.test(String(payload.historyId || ''))
+    ) {
+      return res.status(400).json({ error: 'Missing Pinball update identifiers' });
+    }
+
+    try {
+      const customerName = String(payload.fullName).trim();
+      const phone = String(payload.phone).trim();
+      const staffName = String(payload.actorName).trim();
+      const content = String(payload.content || 'Không có mô tả thay đổi.').trim();
+      const totals = getPinballTotalsFromPayload(payload);
+      const message = [
+        '✏️ <b>Cập nhật mới từ Pinball!</b>',
+        '',
+        '• <b>Khách hàng:</b> ' + escapeHtml(customerName),
+        '• <b>Số điện thoại:</b> ' + escapeHtml(phone),
+        '• <b>Thay đổi:</b> ' + escapeHtml(content),
+        formatPinballTotalLine(totals),
+        '• <b>Nhân viên:</b> ' + escapeHtml(staffName) +
+          ' cập nhật lúc ' + escapeHtml(formatDepositTime(payload.depositTime)) +
+          ' ' + escapeHtml(formatDepositDate(payload.depositDate))
+      ].join('\n');
+
+      const telegramOptions = {
+        parse_mode: 'HTML',
+        ...buildPinballUpdateActionKeyboard(payload.id, payload.historyId)
+      };
+      const deliveryResults = await Promise.allSettled(
+        ADMIN_CHAT_IDS.map((chatId) => bot.telegram.sendMessage(chatId, message, telegramOptions))
+      );
+      const failedDeliveries = deliveryResults
+        .map((result, index) => ({ result, chatId: ADMIN_CHAT_IDS[index] }))
+        .filter(({ result }) => result.status === 'rejected');
+
+      failedDeliveries.forEach(({ result, chatId }) => {
+        console.error(
+          'Failed to send Pinball update notification to chat ' + chatId + ':',
+          result.reason?.message || result.reason
+        );
+      });
+
+      if (failedDeliveries.length === ADMIN_CHAT_IDS.length) {
+        throw failedDeliveries[0].result.reason;
+      }
+      return res.status(200).json({ success: true, message: 'Update notification sent to admin' });
+    } catch (error) {
+      console.error('Failed to send Pinball update notification:', error.message);
+      return res.status(500).json({ error: 'Failed to send Telegram update notification: ' + error.message });
+    }
   }
 
   try {
@@ -1254,6 +1356,52 @@ bot.command('id', async (ctx) => {
 });
 
 // Pinball record action callbacks
+bot.action(/^pb:undo:([0-9a-f]{24}):([0-9a-f]{24})$/i, async (ctx) => {
+  const recordId = ctx.match[1];
+  const historyId = ctx.match[2];
+  if (!isAuthorizedPinballAdmin(ctx)) {
+    return ctx.answerCbQuery('Bạn không có quyền thao tác.', { show_alert: true });
+  }
+
+  await ctx.answerCbQuery();
+  return ctx.editMessageReplyMarkup(
+    buildPinballUpdateUndoConfirmKeyboard(recordId, historyId)
+  );
+});
+
+bot.action(/^pb:undo-no:([0-9a-f]{24}):([0-9a-f]{24})$/i, async (ctx) => {
+  const recordId = ctx.match[1];
+  const historyId = ctx.match[2];
+  if (!isAuthorizedPinballAdmin(ctx)) {
+    return ctx.answerCbQuery('Bạn không có quyền thao tác.', { show_alert: true });
+  }
+
+  await ctx.answerCbQuery('Đã huỷ');
+  return ctx.editMessageReplyMarkup(
+    buildPinballUpdateActionKeyboard(recordId, historyId).reply_markup
+  );
+});
+
+bot.action(/^pb:undo-yes:([0-9a-f]{24}):([0-9a-f]{24})$/i, async (ctx) => {
+  const recordId = ctx.match[1];
+  const historyId = ctx.match[2];
+  if (!isAuthorizedPinballAdmin(ctx)) {
+    return ctx.answerCbQuery('Bạn không có quyền thao tác.', { show_alert: true });
+  }
+
+  await ctx.answerCbQuery('Đang xoá thay đổi...');
+
+  try {
+    const response = await undoPinballUpdate(recordId, historyId);
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+    const actorName = response.data?.actorName ? ' của ' + response.data.actorName : '';
+    return ctx.reply('✅ Đã xoá thay đổi' + actorName + ' trên bản ghi Pinball.');
+  } catch (error) {
+    console.error('Undo Pinball update failed:', error);
+    return ctx.reply('❌ Không xoá được thay đổi: ' + describePinballApiError(error));
+  }
+});
+
 bot.action(/^pb:del:([0-9a-f]{24})$/i, async (ctx) => {
   const recordId = ctx.match[1];
   if (!isAuthorizedPinballAdmin(ctx)) {
