@@ -203,7 +203,7 @@ function getLegacyDepositDate(id) {
 
 function getPinballAppUrl() {
   const configuredUrl = String(process.env.PINBALL_APP_URL || '').trim();
-  const candidates = [configuredUrl, 'https://pinball.babyress.games'].filter(Boolean);
+  const candidates = [configuredUrl, 'https://pinball.aiths.cloud'].filter(Boolean);
 
   for (const candidate of candidates) {
     try {
