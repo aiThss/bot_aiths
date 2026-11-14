@@ -208,6 +208,9 @@ function getPinballAppUrl() {
   for (const candidate of candidates) {
     try {
       const url = new URL(candidate);
+      if (url.hostname.toLowerCase() === 'pinball.babyress.games') {
+        return new URL('https://pinball.aiths.cloud');
+      }
       if (url.protocol === 'http:' || url.protocol === 'https:') return url;
     } catch (_) {
       // Thử URL mặc định nếu biến môi trường bị nhập sai.
@@ -313,7 +316,10 @@ async function undoPinballUpdate(id, historyId) {
 }
 
 function parsePinballTotalText(value) {
-  const match = String(value || '').match(/Thẻ:\s*(\d+)\s*\|\s*Bi:\s*(\d+)/i);
+  const text = String(value || '');
+  const match =
+    text.match(/Thẻ:\s*(\d+)\s*\|\s*Bi:\s*(\d+)/i) ||
+    text.match(/(\d+)\s*thẻ\s*[·|+]\s*(\d+)\s*bi/i);
   if (!match) return null;
 
   return {

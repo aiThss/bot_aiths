@@ -13,7 +13,10 @@ if (!source.includes(helperMarker)) {
   }
 
   const helpers = String.raw`function parsePinballTotalText(value) {
-  const match = String(value || '').match(/Thẻ:\s*(\d+)\s*\|\s*Bi:\s*(\d+)/i);
+  const text = String(value || '');
+  const match =
+    text.match(/Thẻ:\s*(\d+)\s*\|\s*Bi:\s*(\d+)/i) ||
+    text.match(/(\d+)\s*thẻ\s*[·|+]\s*(\d+)\s*bi/i);
   if (!match) return null;
 
   return {

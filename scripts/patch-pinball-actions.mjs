@@ -27,7 +27,14 @@ function replaceOrInsertHelpers() {
   for (const candidate of candidates) {
     try {
       const url = new URL(candidate);
-      if (url.protocol === 'http:' || url.protocol === 'https:') return url;
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        if (url.hostname.toLowerCase() === 'pinball.babyress.games') {
+          url.protocol = 'https:';
+          url.hostname = 'pinball.aiths.cloud';
+          url.port = '';
+        }
+        return url;
+      }
     } catch (_) {
       // Thử URL mặc định nếu biến môi trường bị nhập sai.
     }
